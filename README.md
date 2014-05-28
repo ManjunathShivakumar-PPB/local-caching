@@ -1,4 +1,4 @@
-local-caching
+Local Caching
 =============
 
 Robust implementation of a local cache using google collections.
