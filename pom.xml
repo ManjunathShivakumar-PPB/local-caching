@@ -17,6 +17,53 @@
     <packaging>jar</packaging>
     <name>local-caching</name>
 
+    <organization>
+        <name>Betfair</name>
+        <url>http://www.betfair.com</url>
+    </organization>
+
+    <developers>
+        <developer>
+            <id>all</id>
+            <name>All developers</name>
+            <email>local-caching-dev@googlegroups.com</email>
+        </developer>
+    </developers>
+
+    <licenses>
+        <license>
+            <name>The Apache Software License, Version 2.0</name>
+            <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <url>http://betfair.github.io/local-caching</url>
+
+    <issueManagement>
+        <system>GitHub</system>
+        <url>https://github.com/betfair/cougar/local-caching</url>
+    </issueManagement>
+
+    <mailingLists>
+        <mailingList>
+            <name>Local caching user notification list</name>
+            <post>local-caching-users@googlegroups.com</post>
+            <archive>https://groups.google.com/forum/#!forum/local-caching-users</archive>
+        </mailingList>
+    </mailingLists>
+
+    <scm>
+        <connection>scm:git:git@github.com:betfair/local-caching.git</connection>
+        <url>https://github.com/betfair/local-caching.git</url>
+        <developerConnection>scm:git:git@github.com:betfair/local-caching</developerConnection>
+    </scm>
+
+    <ciManagement>
+        <system>Travis CI</system>
+        <url>https://travis-ci.org/betfair/local-caching</url>
+    </ciManagement>
+    
     <properties>
 	<slf4j.version>1.6.1</slf4j.version>
 	<junit.version>4.9</junit.version>
