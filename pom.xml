@@ -16,6 +16,7 @@
     <artifactId>local-caching</artifactId>
     <packaging>jar</packaging>
     <name>local-caching</name>
+
     <properties>
 	<slf4j.version>1.6.1</slf4j.version>
 	<junit.version>4.9</junit.version>
