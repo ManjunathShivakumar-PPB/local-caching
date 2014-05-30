@@ -1,24 +1,13 @@
 package com.betfair.caching;
 
-import com.google.common.base.Function;
-import com.google.common.collect.MapMaker;
-import com.sun.corba.se.impl.orbutil.concurrent.ReentrantMutex;
+import com.google.common.base.Ticker;
 import junit.framework.AssertionFailedError;
-import org.junit.Assert;
-import org.junit.Ignore;
 import org.junit.Test;
 
-import java.lang.reflect.Field;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Map;
-import java.util.Timer;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static junit.framework.Assert.assertEquals;
-import static junit.framework.Assert.assertTrue;
 
 
 public class InvalidatingLRUCacheAsyncReadthroughTest extends LRUTestSupport {
@@ -28,13 +17,8 @@ public class InvalidatingLRUCacheAsyncReadthroughTest extends LRUTestSupport {
     public void testCacheWithReadAhead() throws Exception {
         TestTimeProvider testTimeProvider = new TestTimeProvider(System.nanoTime());
 
-        Class expirationTimerClass = Class.forName("com.google.common.collect.ExpirationTimer");
-        Field singletonField = expirationTimerClass.getDeclaredField("instance");
-        singletonField.setAccessible(true);
-        Object savedTimerValue = singletonField.get(null);
         try {
             InvalidatingLRUCache.setTimeProvider(testTimeProvider);
-            singletonField.set(null, new TestTimer(testTimeProvider));
             AsyncIntegerLoader loader = new AsyncIntegerLoader(true, 0);
 
             InvalidatingLRUCache<Integer, Integer> cache =
@@ -91,9 +75,7 @@ public class InvalidatingLRUCacheAsyncReadthroughTest extends LRUTestSupport {
             assertEquals(1, loader.getHighestDrainCount());
 
         } finally {
-            ((Timer)singletonField.get(null)).purge();
-            singletonField.set(null, savedTimerValue);
-            InvalidatingLRUCache.setTimeProvider(new InvalidatingLRUCache.TimeProvider());
+            InvalidatingLRUCache.setTimeProvider(Ticker.systemTicker());
         }
     }
 
@@ -101,13 +83,8 @@ public class InvalidatingLRUCacheAsyncReadthroughTest extends LRUTestSupport {
     public void testCacheWithReadAheadBatch() throws Exception {
         TestTimeProvider testTimeProvider = new TestTimeProvider(System.nanoTime());
 
-        Class expirationTimerClass = Class.forName("com.google.common.collect.ExpirationTimer");
-        Field singletonField = expirationTimerClass.getDeclaredField("instance");
-        singletonField.setAccessible(true);
-        Object savedTimerValue = singletonField.get(null);
         try {
             InvalidatingLRUCache.setTimeProvider(testTimeProvider);
-            singletonField.set(null, new TestTimer(testTimeProvider));
             AsyncIntegerLoader loader = new AsyncIntegerLoader(true, 0);
 
             InvalidatingLRUCache<Integer, Integer> cache =
@@ -172,9 +149,7 @@ public class InvalidatingLRUCacheAsyncReadthroughTest extends LRUTestSupport {
             assertEquals(2, loader.getHighestDrainCount());
 
         } finally {
-            ((Timer)singletonField.get(null)).purge();
-            singletonField.set(null, savedTimerValue);
-            InvalidatingLRUCache.setTimeProvider(new InvalidatingLRUCache.TimeProvider());
+            InvalidatingLRUCache.setTimeProvider(Ticker.systemTicker());
         }
     }
 
@@ -182,20 +157,14 @@ public class InvalidatingLRUCacheAsyncReadthroughTest extends LRUTestSupport {
     public void testCacheWithReadAheadAndReadThrough() throws Exception {
         TestTimeProvider testTimeProvider = new TestTimeProvider(System.nanoTime());
 
-        Class expirationTimerClass = Class.forName("com.google.common.collect.ExpirationTimer");
-        Field singletonField = expirationTimerClass.getDeclaredField("instance");
-        singletonField.setAccessible(true);
-        Object savedTimerValue = singletonField.get(null);
         try {
             InvalidatingLRUCache.setTimeProvider(testTimeProvider);
-            singletonField.set(null, new TestTimer(testTimeProvider));
             AsyncIntegerLoader loader = new AsyncIntegerLoader(true, 0);
 
             InvalidatingLRUCache<Integer, Integer> cache =
                     new InvalidatingLRUCache<Integer, Integer>("Test", loader, 10000, Executors.newSingleThreadExecutor(), 0.5);
 
             for (int i = 0; i < 500; i++) {
-                timerClearDown();
                 cache.invalidateAll();
                 cache.resetStats();
                 loader.resetKeyValues();
@@ -266,9 +235,7 @@ public class InvalidatingLRUCacheAsyncReadthroughTest extends LRUTestSupport {
                 assertEquals(0, cache.getReadAheadQueueSize());
             }
         } finally {
-            ((Timer)singletonField.get(null)).purge();
-            singletonField.set(null, savedTimerValue);
-            InvalidatingLRUCache.setTimeProvider(new InvalidatingLRUCache.TimeProvider());
+            InvalidatingLRUCache.setTimeProvider(Ticker.systemTicker());
         }
     }
 }

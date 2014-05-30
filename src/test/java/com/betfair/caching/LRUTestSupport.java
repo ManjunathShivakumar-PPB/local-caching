@@ -1,25 +1,13 @@
 package com.betfair.caching;
 
-import org.junit.After;
+import com.google.common.base.Ticker;
 
-import java.lang.reflect.Field;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class LRUTestSupport {
     protected static final int NUM_KEYS = 10000;
-
-    @After
-    public void timerClearDown() throws Exception{
-        Class expirationTimerClass = Class.forName("com.google.common.collect.ExpirationTimer");
-        Field singletonField = expirationTimerClass.getDeclaredField("instance");
-        singletonField.setAccessible(true);
-        ((Timer)singletonField.get(null)).purge();
-    }
 
     protected static class ValueRememberingThread extends Thread {
         Cache<Integer, Integer> cache;
@@ -36,7 +24,7 @@ public class LRUTestSupport {
         }
     }
 
-    protected static class TestTimeProvider extends InvalidatingLRUCache.TimeProvider {
+    protected static class TestTimeProvider extends Ticker {
         private AtomicLong currentNanos = new AtomicLong(0L);
         protected TestTimeProvider(long initialTime) {
             this.currentNanos.set(initialTime);
@@ -49,7 +37,7 @@ public class LRUTestSupport {
         }
 
         @Override
-        long getNanoTime() {
+        public long read() {
             return currentNanos.get();
         }
         long getMillisTime() {

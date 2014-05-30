@@ -1,7 +1,10 @@
 package com.betfair.caching;
 
-import com.google.common.base.Function;
-import com.google.common.collect.MapMaker;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Ticker;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jmx.export.annotation.ManagedAttribute;
@@ -25,12 +28,12 @@ public class InvalidatingLRUCache<K, V> implements InspectableCache<K,V> {
     private static final Object INVALIDATED_KEY = new Object();
     private static final Object WRITTEN_KEY = new Object();
 
-    private static TimeProvider timeProvider = new TimeProvider();
+    private static Ticker timeProvider = Ticker.systemTicker();
 
     private static final Timer pruneTimer = new Timer("PruneServiceTimer", true);
     private static final long MILLI_TO_NANO = 1000000L;
 
-    private final ConcurrentMap<K, ValueHolder<V>> map;
+    private final LoadingCache<K, ValueHolder<V>> map;
 	private final long ttl;
     private final Loader<K, V> loader;
 	private final String name;
@@ -142,9 +145,9 @@ public class InvalidatingLRUCache<K, V> implements InspectableCache<K,V> {
         this.loader = loader;
         this.readAheadService = new ReadAheadService(svc, ttl, readAheadRatio, loader);
 
-		Function<K, ValueHolder<V>> readthrough = new Function<K, ValueHolder<V>>() {
+		CacheLoader<K, ValueHolder<V>> readthrough = new CacheLoader<K, ValueHolder<V>>() {
 			@Override
-			public ValueHolder<V> apply(K key) {
+			public ValueHolder<V> load(K key) throws Exception {
 
 				misses.incrementAndGet();
                 readAheadService.invalidateInflightRead(key); // not interested in read aheads for this key
@@ -155,11 +158,11 @@ public class InvalidatingLRUCache<K, V> implements InspectableCache<K,V> {
 				return new ValueHolder<V>(value, true);
 			}
 		};
-        MapMaker mapMaker = new MapMaker();
+        CacheBuilder<Object, Object> mapMaker = CacheBuilder.newBuilder().ticker(timeProvider);
         if(ttl != 0) {
-            mapMaker.expiration(ttl, TimeUnit.MILLISECONDS);
+            mapMaker.expireAfterWrite(ttl, TimeUnit.MILLISECONDS);
         }
-        map = mapMaker.makeComputingMap(readthrough);
+        map = mapMaker.build(readthrough);
 
 		log.info("Creating LRU cache ("+name+") with expiry:"+ttl+
                 ", prune interval:"+pruneInterval+", prune from:"+pruneFrom+", prune to:"+pruneTo+
@@ -214,23 +217,27 @@ public class InvalidatingLRUCache<K, V> implements InspectableCache<K,V> {
      * @return a value
      */
 	public V get(K key) {
-		ValueHolder<V> holder = map.get(key);
-        long nanoTime = timeProvider.getNanoTime();
+        try {
+            ValueHolder<V> holder = map.get(key);
+            long nanoTime = timeProvider.read();
 
-        if (!holder.firstLoad.getAndSet(false)) {
-			hits.incrementAndGet();
-            // if it wasn't a first load i.e. it wasn't a read-through
-            // then we request async reload
-            if(readAheadService.enabled && ( nanoTime - holder.loadTime >= readAheadService.readAheadMargin )) {
-                readAheadService.scheduleReload(key);
+            if (!holder.firstLoad.getAndSet(false)) {
+                hits.incrementAndGet();
+                // if it wasn't a first load i.e. it wasn't a read-through
+                // then we request async reload
+                if(readAheadService.enabled && ( nanoTime - holder.loadTime >= readAheadService.readAheadMargin )) {
+                    readAheadService.scheduleReload(key);
+                }
+
             }
+            holder.lastAccess = nanoTime;
 
+            checkSizeAndPrune();
+
+            return holder.value;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
-        holder.lastAccess = nanoTime;
-
-        checkSizeAndPrune();
-
-		return holder.value;
 	}
 
     public Map<K,V> getAll(Collection<K> key){
@@ -246,22 +253,24 @@ public class InvalidatingLRUCache<K, V> implements InspectableCache<K,V> {
 
     @Override
     public boolean containsKey(K key) {
-		return map.containsKey(key);
+		return map.getIfPresent(key) != null;
 	}
 
 	@Override
 	public boolean invalidate(K key) {
+        boolean hadKey = containsKey(key);
 		invalidationCount.incrementAndGet();
         readAheadService.scheduleInvalidation(key);
-		return map.remove(key) != null;
+        map.invalidate(key);
+		return hadKey;
 	}
 
 	@Override
     @ManagedOperation
 	public int invalidateAll() {
-		int oldSize = map.size();
+		int oldSize = getSize();
         readAheadService.invalidateAll();
-		map.clear();
+		map.invalidateAll();
 		// May not be 100% accurate as the map could have mutated between the
 		// size and clear calls.
 		clearCount.incrementAndGet();
@@ -374,7 +383,7 @@ public class InvalidatingLRUCache<K, V> implements InspectableCache<K,V> {
                         threadPool.submit(new Runnable() {
                             @Override
                             public void run() {
-                                map.remove(key);
+                                map.invalidate(key);
                                 readAheadRegistry.remove(key);
                             }
                         });
@@ -439,20 +448,20 @@ public class InvalidatingLRUCache<K, V> implements InspectableCache<K,V> {
                     if (map.size() > from) {
                         lastPruneTime  = new Date();
                         pruneCount.incrementAndGet();
-                        long timeTaken = -timeProvider.getNanoTime();
+                        long timeTaken = -timeProvider.read();
                         // We create a sorted set of the current cache
                         List<LRUInfo> lru = new ArrayList<LRUInfo>();
-                        for (Map.Entry<K, ValueHolder<V>> e: map.entrySet()) {
+                        for (Map.Entry<K, ValueHolder<V>> e: map.asMap().entrySet()) {
                             lru.add(new LRUInfo(e.getValue().lastAccess, e.getKey()));
                         }
                         Collections.sort(lru);
                         // and remove until we get to the target size
                         int numToPrune = lru.size() - to;
                         for (int i = 0; i < numToPrune; i++) {
-                            map.remove(lru.get(i).key);
+                            map.invalidate(lru.get(i).key);
                             ++removals;
                         }
-                        timeTaken += timeProvider.getNanoTime();
+                        timeTaken += timeProvider.read();
 
                         lastPruneRemovals = removals;
                         lastPruneDuration = timeTaken / 1000;
@@ -481,7 +490,7 @@ public class InvalidatingLRUCache<K, V> implements InspectableCache<K,V> {
 	}
 
     /**
-     * Checks if current cache size is bigger than {@link InvalidatingLRUCache#HARD_CAP_RATIO} * pruneFrom and
+     * Checks if current cache size is bigger than {@link com.betfair.caching.InvalidatingLRUCache#HARD_CAP_RATIO} * pruneFrom and
      * does pruning in current thread.
      */
     private void checkSizeAndPrune() {
@@ -497,7 +506,7 @@ public class InvalidatingLRUCache<K, V> implements InspectableCache<K,V> {
 	// value holder
 	//////////////////////////////////////////////////////////////////////////////////////
 	private static final class ValueHolder<V> implements Comparable<ValueHolder<V>> {
-		final long loadTime = timeProvider.getNanoTime();
+		final long loadTime = timeProvider.read();
 		volatile long lastAccess = loadTime;
         final AtomicBoolean firstLoad;
 		final V value;
@@ -547,7 +556,7 @@ public class InvalidatingLRUCache<K, V> implements InspectableCache<K,V> {
 
 	@ManagedAttribute
 	public int getSize() {
-		return map.size();
+		return map.asMap().size();
 	}
 
 	@ManagedAttribute
@@ -655,14 +664,8 @@ public class InvalidatingLRUCache<K, V> implements InspectableCache<K,V> {
 		return bulkLoadCount;
 	}
 
-    public static class TimeProvider {
-        long getNanoTime() {
-            return System.nanoTime();
-        }
-    }
-
-    //--- for testing purposes only
-    static void setTimeProvider(TimeProvider tp) {
+    @VisibleForTesting
+    static void setTimeProvider(Ticker tp) {
         timeProvider = tp;
     }
 
